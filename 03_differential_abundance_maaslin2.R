@@ -11,19 +11,34 @@ library(Maaslin2)
 # Load phyloseq object
 
 ps <- readRDS("phyloseq_Ghana_V4_iptp.rds")
-# Prepare metadata
 
-metadata <- sample_data(ps) %>%
+# Keep only stool samples, with IPTp-SP category and parity information, setting a prevalence filter
+ps_gut <- ps %>%
+    subset_samples(
+        sample_type == "stool"
+    ) %>%
+    subset_samples(
+        !is.na(sp.category3)
+    ) %>%
+    filter_taxa(
+        function(x)
+            sum(x > 0) >
+            0.1 * length(x),
+        TRUE
+    )
+
+# Prepare metadata
+metadata <- sample_data(ps_gut) %>%
   data.frame() %>%
   tibble::rownames_to_column("sample_id")
 
-# Keep only samples with IPTp-SP category and parity information
+# Keep only with IPTp-SP category and parity information
 metadata <- metadata %>%
   filter(
     !is.na(sp.category3),
     sp.category3 != "NA",
-    !is.na(n.birth.category),
-    n.birth.category != "NA"
+    !is.na(parity_collapsed),
+    parity_collapsed != "NA"
   )
 
 # Set reference levels
@@ -32,7 +47,10 @@ metadata$sp.category3 <- factor(
   levels = c("Three or more", "Less than three")
 )
 
-metadata$n.birth.category <- factor(metadata$n.birth.category)
+metadata$parity_collapsed <- factor(
+  metadata$parity_collapsed,
+  levels = c("Nulliparous", "Parous")
+)
 
 #Prep abundance table
 prepare_maaslin_input <- function(ps_object, tax_level = NULL, sample_ids) {
@@ -78,10 +96,11 @@ run_maaslin <- function(ps_object, metadata, output_name, tax_level = NULL) {
     input_data = abundance,
     input_metadata = fit_data,
     output = file.path("results/maaslin2", output_name),
-    fixed_effects = c("sp.category3", "n.birth.category"),
-    reference = c("sp.category3,Three or more"),
-    normalization = "TSS",
-    transform = "LOG",
+    fixed_effects = c("sp.category3", "parity_collapsed"),
+    reference = c("sp.category3,Three or more",
+                 "parity_collapsed,Nulliparous"),
+    normalization = "CLR",
+    transform = "NONE",
     analysis_method = "LM",
     correction = "BH",
     standardize = FALSE,
@@ -92,7 +111,7 @@ run_maaslin <- function(ps_object, metadata, output_name, tax_level = NULL) {
 # Run ASV-level differential abundance
 
 run_maaslin(
-  ps_object = ps,
+  ps_object = ps_gut,
   metadata = metadata,
   output_name = "asv_iptp_adjusted_parity",
   tax_level = NULL
