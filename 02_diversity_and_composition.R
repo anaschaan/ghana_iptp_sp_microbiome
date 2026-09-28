@@ -82,6 +82,20 @@ alpha_div_meta <- alpha_div %>%
 
 write.csv(alpha_div_meta, "results/alpha_diversity_metrics.csv", row.names = FALSE)
 
+# Alpha-diversity sensitivity analysis (excluding one partially exposed participant, with only 1 dose)
+stool_md <- sample_data(ps) %>% data.frame()
+partial_ids <- unique(stool_md$individual[
+  stool_md$sample_type == "stool" & !is.na(stool_md$ipt) &
+    stool_md$ipt == 1
+])
+
+alpha_sens <- alpha_div_meta %>%
+  filter(sample_type == "stool", !is.na(ipt),
+         !individual %in% partial_ids, !is.na(sp.category3))
+write.csv(alpha_sens, "results/alpha_diversity_excluding_partial_dose.csv",
+          row.names = FALSE)
+print(wilcox.test(Shannon ~ sp.category3, data = alpha_sens))
+
 # Beta diversity
 
 ps_rel <- transform_sample_counts(ps, function(x) x / sum(x))
@@ -180,6 +194,67 @@ run_iptp_beta <- function(ps_object, body_site, output_prefix) {
 run_iptp_beta(ps_rel, body_site = "stool", output_prefix = "stool")
 run_iptp_beta(ps_rel, body_site = "vaginal", output_prefix = "vaginal")
 
+# Parity-adjusted PERMANOVAs: same stool samples in all three models
+rel_md <- sample_data(ps_rel) %>% data.frame()
+ps_stool_parity <- prune_samples(
+  rel_md$sample_type == "stool" & !is.na(rel_md$sp.category3) &
+    rel_md$sp.category3 != "NA" & !is.na(rel_md$parity) &
+    !is.na(rel_md$parity_collapsed), ps_rel
+)
+dist_parity <- phyloseq::distance(ps_stool_parity, method = "unifrac")
+md_parity <- sample_data(ps_stool_parity) %>% data.frame()
+
+set.seed(1)
+adonis_unadjusted_same_n <- adonis2(dist_parity ~ sp.category3,
+                                   data = md_parity, permutations = 999)
+set.seed(1)
+adonis_parity_2 <- adonis2(dist_parity ~ sp.category3 + parity_collapsed,
+                          data = md_parity, by = "margin", permutations = 999)
+set.seed(1)
+adonis_parity_3 <- adonis2(dist_parity ~ sp.category3 + parity,
+                          data = md_parity, by = "margin", permutations = 999)
+
+write.csv(as.data.frame(adonis_unadjusted_same_n),
+          "results/permanova_stool_iptp_same_n_unifrac.csv")
+write.csv(as.data.frame(adonis_parity_2),
+          "results/permanova_stool_iptp_parity_2_unifrac.csv")
+write.csv(as.data.frame(adonis_parity_3),
+          "results/permanova_stool_iptp_parity_3_unifrac.csv")
+
+# Continuous dose PERMANOVA, separately for stool and vaginal samples
+run_dose_beta <- function(ps_object, body_site) {
+  sample_md <- sample_data(ps_object) %>% data.frame()
+  ps_sub <- prune_samples(
+    sample_md$sample_type == body_site & !is.na(sample_md$ipt), ps_object
+  )
+  dist <- phyloseq::distance(ps_sub, method = "unifrac")
+  meta <- sample_data(ps_sub) %>% data.frame()
+  meta$ipt <- as.numeric(as.character(meta$ipt))
+  stopifnot(!anyNA(meta$ipt))
+  set.seed(1)
+  res <- adonis2(dist ~ ipt, data = meta, permutations = 999)
+  write.csv(as.data.frame(res),
+            paste0("results/permanova_", body_site, "_dose_unifrac.csv"))
+  res
+}
+
+adonis_dose_stool <- run_dose_beta(ps_rel, "stool")
+adonis_dose_vaginal <- run_dose_beta(ps_rel, "vaginal")
+
+# Stool PERMANOVA excluding the partially exposed participant
+ps_stool_sens <- prune_samples(
+  rel_md$sample_type == "stool" & !is.na(rel_md$ipt) &
+    !rel_md$individual %in% partial_ids & !is.na(rel_md$sp.category3), ps_rel
+)
+dist_sens <- phyloseq::distance(ps_stool_sens, method = "unifrac")
+md_sens <- sample_data(ps_stool_sens) %>% data.frame()
+set.seed(123)
+adonis_sens <- adonis2(dist_sens ~ sp.category3,
+                      data = md_sens, permutations = 999)
+write.csv(as.data.frame(adonis_sens),
+          "results/permanova_stool_iptp_excluding_partial_dose_unifrac.csv")
+
+                                  
 # -----------------------------
 # Taxonomic composition
 # -----------------------------
